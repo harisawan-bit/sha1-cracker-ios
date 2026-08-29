@@ -69,7 +69,7 @@ public final class MetalCrackerEngine: ObservableObject {
     // Execution Control
     private var isCancelled: Bool = false
     private var isPaused: Bool = false
-    private var crackTask: Task<Void, Never>?
+    private let workQueue = DispatchQueue(label: "com.harisawan.sha1cracker.gpu", qos: .userInitiated)
     private var timer: AnyCancellable?
 
     // Performance tracking
@@ -105,7 +105,6 @@ public final class MetalCrackerEngine: ObservableObject {
             if let defaultLib = defaultDevice.makeDefaultLibrary() {
                 library = defaultLib
             } else {
-                // Fallback: compile shader from source string if bundled library isn't present
                 guard let shaderURL = Bundle.main.url(forResource: "sha1_mask", withExtension: "metal"),
                       let source = try? String(contentsOf: shaderURL) else {
                     throw NSError(domain: "MetalCracker", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to locate sha1_mask.metal"])
@@ -183,7 +182,8 @@ public final class MetalCrackerEngine: ObservableObject {
             total = next
         }
 
-        self.totalKeys = total
+        let finalTotal = total
+        self.totalKeys = finalTotal
         self.keysTested = 0
         self.progressFraction = 0.0
         self.foundCandidate = nil
@@ -195,20 +195,20 @@ public final class MetalCrackerEngine: ObservableObject {
         self.lastSpeedCheckKeys = 0
 
         log("Starting crack: prefix='\(config.prefix)', suffixLen=\(config.suffixLength), base=\(base)")
-        log("Total keyspace: \(formatNumber(total)) candidates.")
+        log("Total keyspace: \(formatNumber(finalTotal)) candidates.")
 
         // Start UI Telemetry Timer
         startTelemetryTimer()
 
-        // Launch background task
-        crackTask = Task.detached(priority: .userInitiated) { [weak self] in
+        // Launch background work on dedicated GCD queue
+        workQueue.async { [weak self] in
             guard let self = self else { return }
-            await self.runCrackingLoop(
+            self.runCrackingLoop(
                 device: device,
                 commandQueue: commandQueue,
                 pipeline: pipeline,
                 config: config,
-                totalKeys: total
+                totalKeys: finalTotal
             )
         }
     }
@@ -219,7 +219,7 @@ public final class MetalCrackerEngine: ObservableObject {
         pipeline: MTLComputePipelineState,
         config: CrackConfig,
         totalKeys: UInt64
-    ) async {
+    ) {
         let maxConcurrentBuffers = 3
         let semaphore = DispatchSemaphore(value: maxConcurrentBuffers)
         var currentStartIdx: UInt64 = 0
@@ -237,7 +237,10 @@ public final class MetalCrackerEngine: ObservableObject {
         }
 
         guard paramBuffers.count == maxConcurrentBuffers else {
-            await updateStateOnMain(.error, logMsg: "Failed to allocate Metal buffers.")
+            DispatchQueue.main.async {
+                self.state = .error
+                self.log("Failed to allocate Metal buffers.")
+            }
             return
         }
 
@@ -246,7 +249,7 @@ public final class MetalCrackerEngine: ObservableObject {
 
         while currentStartIdx < totalKeys && !isCancelled && foundPlaintext == nil {
             if isPaused {
-                try? await Task.sleep(nanoseconds: 100_000_000)
+                Thread.sleep(forTimeInterval: 0.1)
                 continue
             }
 
@@ -254,9 +257,9 @@ public final class MetalCrackerEngine: ObservableObject {
             if config.autoThermalThrottle {
                 let thermal = ProcessInfo.processInfo.thermalState
                 if thermal == .serious {
-                    try? await Task.sleep(nanoseconds: 20_000_000) // 20ms pause
+                    Thread.sleep(forTimeInterval: 0.02)
                 } else if thermal == .critical {
-                    try? await Task.sleep(nanoseconds: 80_000_000) // 80ms pause
+                    Thread.sleep(forTimeInterval: 0.08)
                 }
             }
 
@@ -288,7 +291,6 @@ public final class MetalCrackerEngine: ObservableObject {
             encoder.setBuffer(pb, offset: 0, index: 0)
             encoder.setBuffer(rb, offset: 0, index: 1)
 
-            // Dispatch 1D grid with 256 threads per threadgroup (optimal for Apple Silicon)
             let threadsPerGroup = MTLSize(width: min(256, Int(thisChunkSize)), height: 1, depth: 1)
             let totalThreads = MTLSize(width: Int(thisChunkSize), height: 1, depth: 1)
             encoder.dispatchThreads(totalThreads, threadsPerThreadgroup: threadsPerGroup)
@@ -302,7 +304,6 @@ public final class MetalCrackerEngine: ObservableObject {
                 // Check if result was found
                 let foundFlag = rb.contents().load(as: UInt32.self)
                 if foundFlag != 0 {
-                    let matchedLen = rb.contents().advanced(by: 8).load(as: UInt32.self)
                     let candPtr = rb.contents().advanced(by: 12).bindMemory(to: CChar.self, capacity: 64)
                     let text = String(cString: candPtr)
                     foundPlaintext = text
@@ -326,12 +327,21 @@ public final class MetalCrackerEngine: ObservableObject {
         }
 
         // Final result handling
-        if let found = foundPlaintext {
-            await updateStateOnMain(.found, foundCandidate: found, logMsg: "FOUND TARGET MATCH: \(found)")
-        } else if isCancelled {
-            await updateStateOnMain(.idle, logMsg: "Cracking stopped by user.")
-        } else {
-            await updateStateOnMain(.completed, logMsg: "Cracking completed. Key space exhausted without match.")
+        let finalCandidate = foundPlaintext
+        let wasCancelled = self.isCancelled
+
+        DispatchQueue.main.async {
+            if let found = finalCandidate {
+                self.state = .found
+                self.foundCandidate = found
+                self.log("FOUND TARGET MATCH: \(found)")
+            } else if wasCancelled {
+                self.state = .idle
+                self.log("Cracking stopped by user.")
+            } else {
+                self.state = .completed
+                self.log("Cracking completed. Key space exhausted without match.")
+            }
         }
     }
 
@@ -460,7 +470,6 @@ public final class MetalCrackerEngine: ObservableObject {
 
     public func stop() {
         isCancelled = true
-        crackTask?.cancel()
         timer?.cancel()
         state = .idle
         log("Stopped.")
@@ -542,21 +551,6 @@ public final class MetalCrackerEngine: ObservableObject {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
-    @MainActor
-    private func updateStateOnMain(
-        _ newState: CrackerState,
-        foundCandidate: String? = nil,
-        logMsg: String? = nil
-    ) {
-        self.state = newState
-        if let found = foundCandidate {
-            self.foundCandidate = found
-        }
-        if let msg = logMsg {
-            self.log(msg)
-        }
-    }
-
     public func log(_ message: String) {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss"

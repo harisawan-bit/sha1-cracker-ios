@@ -11,6 +11,8 @@
 		1A0000200000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000100000000000000002 /* ContentView.swift */; };
 		1A0000200000000000000003 /* MetalCrackerEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000100000000000000003 /* MetalCrackerEngine.swift */; };
 		1A0000200000000000000004 /* sha1_mask.metal in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000100000000000000004 /* sha1_mask.metal */; };
+		1A0000200000000000000005 /* CrackerCheckpointManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000100000000000000006 /* CrackerCheckpointManager.swift */; };
+		1A0000200000000000000006 /* CPUARM64CryptoEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000100000000000000007 /* CPUARM64CryptoEngine.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -20,6 +22,8 @@
 		1A0000100000000000000003 /* MetalCrackerEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalCrackerEngine.swift; sourceTree = "<group>"; };
 		1A0000100000000000000004 /* sha1_mask.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = sha1_mask.metal; sourceTree = "<group>"; };
 		1A0000100000000000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		1A0000100000000000000006 /* CrackerCheckpointManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrackerCheckpointManager.swift; sourceTree = "<group>"; };
+		1A0000100000000000000007 /* CPUARM64CryptoEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPUARM64CryptoEngine.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -47,6 +51,8 @@
 				1A0000100000000000000001 /* SHA1CrackerApp.swift */,
 				1A0000100000000000000002 /* ContentView.swift */,
 				1A0000100000000000000003 /* MetalCrackerEngine.swift */,
+				1A0000100000000000000006 /* CrackerCheckpointManager.swift */,
+				1A0000100000000000000007 /* CPUARM64CryptoEngine.swift */,
 				1A0000100000000000000004 /* sha1_mask.metal */,
 				1A0000100000000000000005 /* Info.plist */,
 			);
@@ -132,6 +138,8 @@
 				1A0000200000000000000001 /* SHA1CrackerApp.swift in Sources */,
 				1A0000200000000000000002 /* ContentView.swift in Sources */,
 				1A0000200000000000000003 /* MetalCrackerEngine.swift in Sources */,
+				1A0000200000000000000005 /* CrackerCheckpointManager.swift in Sources */,
+				1A0000200000000000000006 /* CPUARM64CryptoEngine.swift in Sources */,
 				1A0000200000000000000004 /* sha1_mask.metal in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -11,7 +11,6 @@
 		1A0000200000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000100000000000000002 /* ContentView.swift */; };
 		1A0000200000000000000003 /* MetalCrackerEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000100000000000000003 /* MetalCrackerEngine.swift */; };
 		1A0000200000000000000004 /* sha1_mask.metal in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000100000000000000004 /* sha1_mask.metal */; };
-		1A0000200000000000000005 /* sha1_mask.metal in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000100000000000000004 /* sha1_mask.metal */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -120,7 +119,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1A0000200000000000000005 /* sha1_mask.metal in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

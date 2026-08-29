@@ -1,0 +1,271 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1A0000200000000000000001 /* SHA1CrackerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000100000000000000001 /* SHA1CrackerApp.swift */; };
+		1A0000200000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000100000000000000002 /* ContentView.swift */; };
+		1A0000200000000000000003 /* MetalCrackerEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000100000000000000003 /* MetalCrackerEngine.swift */; };
+		1A0000200000000000000004 /* sha1_mask.metal in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000100000000000000004 /* sha1_mask.metal */; };
+		1A0000200000000000000005 /* sha1_mask.metal in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000100000000000000004 /* sha1_mask.metal */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		1A0000060000000000000001 /* sha1-cracker-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "sha1-cracker-ios.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A0000100000000000000001 /* SHA1CrackerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SHA1CrackerApp.swift; sourceTree = "<group>"; };
+		1A0000100000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		1A0000100000000000000003 /* MetalCrackerEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalCrackerEngine.swift; sourceTree = "<group>"; };
+		1A0000100000000000000004 /* sha1_mask.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = sha1_mask.metal; sourceTree = "<group>"; };
+		1A0000100000000000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1A0000300000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1A0000030000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				1A0000040000000000000001 /* sha1-cracker-ios */,
+				1A0000050000000000000001 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		1A0000040000000000000001 /* sha1-cracker-ios */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000100000000000000001 /* SHA1CrackerApp.swift */,
+				1A0000100000000000000002 /* ContentView.swift */,
+				1A0000100000000000000003 /* MetalCrackerEngine.swift */,
+				1A0000100000000000000004 /* sha1_mask.metal */,
+				1A0000100000000000000005 /* Info.plist */,
+			);
+			path = "sha1-cracker-ios";
+			sourceTree = "<group>";
+		};
+		1A0000050000000000000001 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000060000000000000001 /* sha1-cracker-ios.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1A0000020000000000000001 /* sha1-cracker-ios */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A0000500000000000000001 /* Build configuration list for PBXNativeTarget "sha1-cracker-ios" */;
+			buildPhases = (
+				1A0000300000000000000001 /* Sources */,
+				1A0000300000000000000002 /* Frameworks */,
+				1A0000300000000000000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "sha1-cracker-ios";
+			productName = "sha1-cracker-ios";
+			productReference = 1A0000060000000000000001 /* sha1-cracker-ios.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1A0000010000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					1A0000020000000000000001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = 1A0000400000000000000001 /* Build configuration list for PBXProject "sha1-cracker-ios" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 1A0000030000000000000001;
+			productRefGroup = 1A0000050000000000000001 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				1A0000020000000000000001 /* sha1-cracker-ios */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1A0000300000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A0000200000000000000005 /* sha1_mask.metal in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1A0000300000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A0000200000000000000001 /* SHA1CrackerApp.swift in Sources */,
+				1A0000200000000000000002 /* ContentView.swift in Sources */,
+				1A0000200000000000000003 /* MetalCrackerEngine.swift in Sources */,
+				1A0000200000000000000004 /* sha1_mask.metal in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		1A0000400000000000000002 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+			};
+			name = Debug;
+		};
+		1A0000400000000000000003 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = "wholemodule";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		1A0000500000000000000002 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				AD_HOC_CODE_SIGNING_ALLOWED = YES;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_IDENTITY = "";
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "sha1-cracker-ios/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.harisawan.sha1cracker";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		1A0000500000000000000003 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				AD_HOC_CODE_SIGNING_ALLOWED = YES;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_IDENTITY = "";
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "sha1-cracker-ios/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.harisawan.sha1cracker";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1A0000400000000000000001 /* Build configuration list for PBXProject "sha1-cracker-ios" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A0000400000000000000002 /* Debug */,
+				1A0000400000000000000003 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1A0000500000000000000001 /* Build configuration list for PBXNativeTarget "sha1-cracker-ios" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A0000500000000000000002 /* Debug */,
+				1A0000500000000000000003 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = 1A0000010000000000000001 /* Project object */;
+}

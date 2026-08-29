@@ -1,0 +1,592 @@
+import Foundation
+import Metal
+import Combine
+import UIKit
+
+// -----------------------------------------------------------------------------
+// Engine Status & Telemetry
+// -----------------------------------------------------------------------------
+
+public enum CrackerState: String {
+    case idle = "Idle"
+    case selfTesting = "Testing Metal GPU..."
+    case selfTestPassed = "Ready (Self-Test Passed)"
+    case selfTestFailed = "Self-Test Failed"
+    case running = "Cracking (GPU Active)"
+    case paused = "Paused"
+    case found = "TARGET CRACKED!"
+    case completed = "Finished (Exhausted)"
+    case error = "Error"
+}
+
+public struct CrackConfig {
+    public var targetHashHexStrings: [String]
+    public var prefix: String
+    public var charset: String
+    public var suffixLength: Int
+    public var chunkSize: Int
+    public var autoThermalThrottle: Bool
+
+    public static let h2Preset = CrackConfig(
+        targetHashHexStrings: ["fa4584ca1d5bd18dc467ef31f84a337f32329c40"],
+        prefix: "sadiy",
+        charset: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+        suffixLength: 7,
+        chunkSize: 8_388_608, // 8M keys per chunk (~2-5ms per dispatch on A17 Pro)
+        autoThermalThrottle: true
+    )
+
+    public static let h1SelfTestPreset = CrackConfig(
+        targetHashHexStrings: ["824dd5552ec2cc0ccab320198fb47b3b032f2d3f"],
+        prefix: "sn200",
+        charset: "0123456789",
+        suffixLength: 1,
+        chunkSize: 64,
+        autoThermalThrottle: false
+    )
+}
+
+public final class MetalCrackerEngine: ObservableObject {
+    // UI Published state
+    @Published public var state: CrackerState = .idle
+    @Published public var keysTested: UInt64 = 0
+    @Published public var totalKeys: UInt64 = 0
+    @Published public var progressFraction: Double = 0.0
+    @Published public var speedMKeysPerSec: Double = 0.0
+    @Published public var speedGKeysPerSec: Double = 0.0
+    @Published public var elapsedTimeSec: Double = 0.0
+    @Published public var etaString: String = "--"
+    @Published public var thermalStateDescription: String = "Nominal"
+    @Published public var thermalStateColor: String = "green"
+    @Published public var foundCandidate: String? = nil
+    @Published public var logs: [String] = []
+
+    // Metal Pipeline
+    private var device: MTLDevice?
+    private var commandQueue: MTLCommandQueue?
+    private var pipelineState: MTLComputePipelineState?
+
+    // Execution Control
+    private var isCancelled: Bool = false
+    private var isPaused: Bool = false
+    private var crackTask: Task<Void, Never>?
+    private var timer: AnyCancellable?
+
+    // Performance tracking
+    private var startTime: Date?
+    private var lastSpeedCheckTime: Date?
+    private var lastSpeedCheckKeys: UInt64 = 0
+
+    public init() {
+        setupMetal()
+        setupThermalObserver()
+        log("Metal Cracker Engine initialized.")
+        // Automatically trigger self-test on init
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.runSelfTest()
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Metal Pipeline Setup
+    // -------------------------------------------------------------------------
+    private func setupMetal() {
+        guard let defaultDevice = MTLCreateSystemDefaultDevice() else {
+            state = .error
+            log("ERROR: Metal is not supported on this device.")
+            return
+        }
+        self.device = defaultDevice
+        self.commandQueue = defaultDevice.makeCommandQueue()
+        log("Metal Device: \(defaultDevice.name)")
+
+        do {
+            let library: MTLLibrary
+            if let defaultLib = defaultDevice.makeDefaultLibrary() {
+                library = defaultLib
+            } else {
+                // Fallback: compile shader from source string if bundled library isn't present
+                guard let shaderURL = Bundle.main.url(forResource: "sha1_mask", withExtension: "metal"),
+                      let source = try? String(contentsOf: shaderURL) else {
+                    throw NSError(domain: "MetalCracker", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to locate sha1_mask.metal"])
+                }
+                library = try defaultDevice.makeLibrary(source: source, options: nil)
+            }
+
+            guard let kernelFunc = library.makeFunction(name: "sha1_mask_crack") else {
+                throw NSError(domain: "MetalCracker", code: 2, userInfo: [NSLocalizedDescriptionKey: "Function 'sha1_mask_crack' not found in library"])
+            }
+
+            self.pipelineState = try defaultDevice.makeComputePipelineState(function: kernelFunc)
+            log("Compute Pipeline compiled successfully.")
+        } catch {
+            state = .error
+            log("ERROR compiling Metal shader: \(error.localizedDescription)")
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Self-Test Verification
+    // -------------------------------------------------------------------------
+    public func runSelfTest() {
+        guard let device = device, let commandQueue = commandQueue, let pipeline = pipelineState else {
+            state = .selfTestFailed
+            log("Self-test aborted: Metal pipeline not ready.")
+            return
+        }
+
+        state = .selfTesting
+        log("Running GPU Self-Test with known vector: sn2005 (H1)...")
+
+        let config = CrackConfig.h1SelfTestPreset
+        let result = executeSynchronousChunk(
+            device: device,
+            commandQueue: commandQueue,
+            pipeline: pipeline,
+            config: config,
+            startIdx: 0,
+            count: 10
+        )
+
+        if let candidate = result, candidate == "sn2005" {
+            state = .selfTestPassed
+            log("Self-Test PASSED! Correctly cracked: \(candidate)")
+        } else {
+            state = .selfTestFailed
+            log("Self-Test FAILED! Expected 'sn2005', got \(result ?? "nil")")
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Cracking Execution Loop
+    // -------------------------------------------------------------------------
+    public func startCracking(config: CrackConfig) {
+        guard let device = device, let commandQueue = commandQueue, let pipeline = pipelineState else {
+            log("ERROR: Metal device or pipeline unavailable.")
+            return
+        }
+
+        guard !config.targetHashHexStrings.isEmpty else {
+            log("ERROR: No target hashes provided.")
+            return
+        }
+
+        // Calculate total keyspace: base ^ suffixLength
+        let base = UInt64(config.charset.count)
+        var total: UInt64 = 1
+        for _ in 0..<config.suffixLength {
+            let (next, overflow) = total.multipliedReportingOverflow(by: base)
+            if overflow {
+                total = UInt64.max
+                break
+            }
+            total = next
+        }
+
+        self.totalKeys = total
+        self.keysTested = 0
+        self.progressFraction = 0.0
+        self.foundCandidate = nil
+        self.isCancelled = false
+        self.isPaused = false
+        self.state = .running
+        self.startTime = Date()
+        self.lastSpeedCheckTime = Date()
+        self.lastSpeedCheckKeys = 0
+
+        log("Starting crack: prefix='\(config.prefix)', suffixLen=\(config.suffixLength), base=\(base)")
+        log("Total keyspace: \(formatNumber(total)) candidates.")
+
+        // Start UI Telemetry Timer
+        startTelemetryTimer()
+
+        // Launch background task
+        crackTask = Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self = self else { return }
+            await self.runCrackingLoop(
+                device: device,
+                commandQueue: commandQueue,
+                pipeline: pipeline,
+                config: config,
+                totalKeys: total
+            )
+        }
+    }
+
+    private func runCrackingLoop(
+        device: MTLDevice,
+        commandQueue: MTLCommandQueue,
+        pipeline: MTLComputePipelineState,
+        config: CrackConfig,
+        totalKeys: UInt64
+    ) async {
+        let maxConcurrentBuffers = 3
+        let semaphore = DispatchSemaphore(value: maxConcurrentBuffers)
+        var currentStartIdx: UInt64 = 0
+        let chunkSize = UInt64(config.chunkSize)
+
+        // Allocate reusable double/triple buffers
+        var paramBuffers: [MTLBuffer] = []
+        var resultBuffers: [MTLBuffer] = []
+        for _ in 0..<maxConcurrentBuffers {
+            if let pb = device.makeBuffer(length: 512, options: .storageModeShared),
+               let rb = device.makeBuffer(length: 128, options: .storageModeShared) {
+                paramBuffers.append(pb)
+                resultBuffers.append(rb)
+            }
+        }
+
+        guard paramBuffers.count == maxConcurrentBuffers else {
+            await updateStateOnMain(.error, logMsg: "Failed to allocate Metal buffers.")
+            return
+        }
+
+        var bufferIndex = 0
+        var foundPlaintext: String? = nil
+
+        while currentStartIdx < totalKeys && !isCancelled && foundPlaintext == nil {
+            if isPaused {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                continue
+            }
+
+            // Adaptive thermal throttle if device is hot
+            if config.autoThermalThrottle {
+                let thermal = ProcessInfo.processInfo.thermalState
+                if thermal == .serious {
+                    try? await Task.sleep(nanoseconds: 20_000_000) // 20ms pause
+                } else if thermal == .critical {
+                    try? await Task.sleep(nanoseconds: 80_000_000) // 80ms pause
+                }
+            }
+
+            semaphore.wait()
+
+            let thisChunkSize = min(chunkSize, totalKeys - currentStartIdx)
+            let pb = paramBuffers[bufferIndex]
+            let rb = resultBuffers[bufferIndex]
+            bufferIndex = (bufferIndex + 1) % maxConcurrentBuffers
+
+            // Write parameters to buffer
+            writeParams(
+                to: pb,
+                startIdx: currentStartIdx,
+                chunkSize: UInt32(thisChunkSize),
+                config: config
+            )
+
+            // Reset result buffer found_flag to 0
+            rb.contents().initializeMemory(as: UInt8.self, repeating: 0, count: 128)
+
+            guard let commandBuffer = commandQueue.makeCommandBuffer(),
+                  let encoder = commandBuffer.makeComputeCommandEncoder() else {
+                semaphore.signal()
+                break
+            }
+
+            encoder.setComputePipelineState(pipeline)
+            encoder.setBuffer(pb, offset: 0, index: 0)
+            encoder.setBuffer(rb, offset: 0, index: 1)
+
+            // Dispatch 1D grid with 256 threads per threadgroup (optimal for Apple Silicon)
+            let threadsPerGroup = MTLSize(width: min(256, Int(thisChunkSize)), height: 1, depth: 1)
+            let totalThreads = MTLSize(width: Int(thisChunkSize), height: 1, depth: 1)
+            encoder.dispatchThreads(totalThreads, threadsPerThreadgroup: threadsPerGroup)
+            encoder.endEncoding()
+
+            let dispatchedCount = thisChunkSize
+            commandBuffer.addCompletedHandler { [weak self] _ in
+                defer { semaphore.signal() }
+                guard let self = self else { return }
+
+                // Check if result was found
+                let foundFlag = rb.contents().load(as: UInt32.self)
+                if foundFlag != 0 {
+                    let matchedLen = rb.contents().advanced(by: 8).load(as: UInt32.self)
+                    let candPtr = rb.contents().advanced(by: 12).bindMemory(to: CChar.self, capacity: 64)
+                    let text = String(cString: candPtr)
+                    foundPlaintext = text
+                }
+
+                DispatchQueue.main.async {
+                    self.keysTested += dispatchedCount
+                    if self.totalKeys > 0 {
+                        self.progressFraction = Double(self.keysTested) / Double(self.totalKeys)
+                    }
+                }
+            }
+
+            commandBuffer.commit()
+            currentStartIdx += thisChunkSize
+        }
+
+        // Wait for all in-flight command buffers to finish
+        for _ in 0..<maxConcurrentBuffers {
+            semaphore.wait()
+        }
+
+        // Final result handling
+        if let found = foundPlaintext {
+            await updateStateOnMain(.found, foundCandidate: found, logMsg: "FOUND TARGET MATCH: \(found)")
+        } else if isCancelled {
+            await updateStateOnMain(.idle, logMsg: "Cracking stopped by user.")
+        } else {
+            await updateStateOnMain(.completed, logMsg: "Cracking completed. Key space exhausted without match.")
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Helper: Synchronous Single-Chunk Execution (for Self-Test)
+    // -------------------------------------------------------------------------
+    private func executeSynchronousChunk(
+        device: MTLDevice,
+        commandQueue: MTLCommandQueue,
+        pipeline: MTLComputePipelineState,
+        config: CrackConfig,
+        startIdx: UInt64,
+        count: UInt32
+    ) -> String? {
+        guard let pb = device.makeBuffer(length: 512, options: .storageModeShared),
+              let rb = device.makeBuffer(length: 128, options: .storageModeShared),
+              let commandBuffer = commandQueue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            return nil
+        }
+
+        writeParams(to: pb, startIdx: startIdx, chunkSize: count, config: config)
+        rb.contents().initializeMemory(as: UInt8.self, repeating: 0, count: 128)
+
+        encoder.setComputePipelineState(pipeline)
+        encoder.setBuffer(pb, offset: 0, index: 0)
+        encoder.setBuffer(rb, offset: 0, index: 1)
+
+        let threadsPerGroup = MTLSize(width: min(256, Int(count)), height: 1, depth: 1)
+        let totalThreads = MTLSize(width: Int(count), height: 1, depth: 1)
+        encoder.dispatchThreads(totalThreads, threadsPerThreadgroup: threadsPerGroup)
+        encoder.endEncoding()
+
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+
+        let foundFlag = rb.contents().load(as: UInt32.self)
+        if foundFlag != 0 {
+            let candPtr = rb.contents().advanced(by: 12).bindMemory(to: CChar.self, capacity: 64)
+            return String(cString: candPtr)
+        }
+        return nil
+    }
+
+    // -------------------------------------------------------------------------
+    // Parameter Serialization
+    // -------------------------------------------------------------------------
+    private func writeParams(
+        to buffer: MTLBuffer,
+        startIdx: UInt64,
+        chunkSize: UInt32,
+        config: CrackConfig
+    ) {
+        let ptr = buffer.contents()
+        ptr.initializeMemory(as: UInt8.self, repeating: 0, count: 512)
+
+        // struct CrackParams layout:
+        // offset 0:  ulong chunk_start_idx (8 bytes)
+        // offset 8:  uint chunk_size (4 bytes)
+        // offset 12: uint prefix_len (4 bytes)
+        // offset 16: uint suffix_len (4 bytes)
+        // offset 20: uint base (4 bytes)
+        // offset 24: uint target_count (4 bytes)
+        // offset 28: uint target_hashes[16 * 5] (320 bytes)
+        // offset 348: uchar prefix[64] (64 bytes)
+        // offset 412: uchar charset[64] (64 bytes)
+
+        ptr.storeBytes(of: startIdx, toByteOffset: 0, as: UInt64.self)
+        ptr.storeBytes(of: chunkSize, toByteOffset: 8, as: UInt32.self)
+
+        let prefixBytes = Array(config.prefix.utf8)
+        let prefixLen = UInt32(prefixBytes.count)
+        ptr.storeBytes(of: prefixLen, toByteOffset: 12, as: UInt32.self)
+
+        let suffixLen = UInt32(config.suffixLength)
+        ptr.storeBytes(of: suffixLen, toByteOffset: 16, as: UInt32.self)
+
+        let charsetBytes = Array(config.charset.utf8)
+        let base = UInt32(charsetBytes.count)
+        ptr.storeBytes(of: base, toByteOffset: 20, as: UInt32.self)
+
+        let targetCount = UInt32(min(16, config.targetHashHexStrings.count))
+        ptr.storeBytes(of: targetCount, toByteOffset: 24, as: UInt32.self)
+
+        // Parse target hashes (5x UInt32 big-endian per hash)
+        for t in 0..<Int(targetCount) {
+            let hex = config.targetHashHexStrings[t].trimmingCharacters(in: .whitespacesAndNewlines)
+            if hex.count == 40 {
+                for wordIdx in 0..<5 {
+                    let start = hex.index(hex.startIndex, offsetBy: wordIdx * 8)
+                    let end = hex.index(start, offsetBy: 8)
+                    let wordHex = String(hex[start..<end])
+                    if let wordVal = UInt32(wordHex, radix: 16) {
+                        let offset = 28 + (t * 5 + wordIdx) * 4
+                        ptr.storeBytes(of: wordVal, toByteOffset: offset, as: UInt32.self)
+                    }
+                }
+            }
+        }
+
+        // Copy prefix bytes
+        for i in 0..<min(64, prefixBytes.count) {
+            ptr.advanced(by: 348 + i).storeBytes(of: prefixBytes[i], as: UInt8.self)
+        }
+
+        // Copy charset bytes
+        for i in 0..<min(64, charsetBytes.count) {
+            ptr.advanced(by: 412 + i).storeBytes(of: charsetBytes[i], as: UInt8.self)
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // User Controls
+    // -------------------------------------------------------------------------
+    public func pause() {
+        isPaused = true
+        state = .paused
+        log("Paused.")
+    }
+
+    public func resume() {
+        isPaused = false
+        state = .running
+        log("Resumed.")
+    }
+
+    public func stop() {
+        isCancelled = true
+        crackTask?.cancel()
+        timer?.cancel()
+        state = .idle
+        log("Stopped.")
+    }
+
+    // -------------------------------------------------------------------------
+    // Telemetry & Thermal Monitoring
+    // -------------------------------------------------------------------------
+    private func startTelemetryTimer() {
+        timer?.cancel()
+        timer = Timer.publish(every: 0.5, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.updateTelemetry()
+            }
+    }
+
+    private func updateTelemetry() {
+        guard let start = startTime, state == .running else { return }
+        let now = Date()
+        let elapsed = now.timeIntervalSince(start)
+        self.elapsedTimeSec = elapsed
+
+        if let lastCheck = lastSpeedCheckTime {
+            let interval = now.timeIntervalSince(lastCheck)
+            if interval >= 0.5 {
+                let keysDelta = keysTested > lastSpeedCheckKeys ? keysTested - lastSpeedCheckKeys : 0
+                let currentSpeedMKeys = Double(keysDelta) / interval / 1_000_000.0
+                self.speedMKeysPerSec = currentSpeedMKeys
+                self.speedGKeysPerSec = currentSpeedMKeys / 1000.0
+
+                self.lastSpeedCheckTime = now
+                self.lastSpeedCheckKeys = keysTested
+
+                // Calculate ETA
+                if currentSpeedMKeys > 0 && keysTested < totalKeys {
+                    let remainingKeys = totalKeys - keysTested
+                    let etaSeconds = Double(remainingKeys) / (currentSpeedMKeys * 1_000_000.0)
+                    self.etaString = formatETA(seconds: etaSeconds)
+                } else if keysTested >= totalKeys {
+                    self.etaString = "0s"
+                }
+            }
+        }
+    }
+
+    private func setupThermalObserver() {
+        updateThermalState()
+        NotificationCenter.default.addObserver(
+            forName: ProcessInfo.thermalStateDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.updateThermalState()
+        }
+    }
+
+    private func updateThermalState() {
+        let state = ProcessInfo.processInfo.thermalState
+        switch state {
+        case .nominal:
+            thermalStateDescription = "Nominal (Cool)"
+            thermalStateColor = "green"
+        case .fair:
+            thermalStateDescription = "Fair (Warm)"
+            thermalStateColor = "yellow"
+        case .serious:
+            thermalStateDescription = "Serious (Throttling)"
+            thermalStateColor = "orange"
+        case .critical:
+            thermalStateDescription = "Critical (High Heat)"
+            thermalStateColor = "red"
+        @unknown default:
+            thermalStateDescription = "Unknown"
+            thermalStateColor = "gray"
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+    @MainActor
+    private func updateStateOnMain(
+        _ newState: CrackerState,
+        foundCandidate: String? = nil,
+        logMsg: String? = nil
+    ) {
+        self.state = newState
+        if let found = foundCandidate {
+            self.foundCandidate = found
+        }
+        if let msg = logMsg {
+            self.log(msg)
+        }
+    }
+
+    public func log(_ message: String) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        let timestamp = formatter.string(from: Date())
+        DispatchQueue.main.async {
+            self.logs.append("[\(timestamp)] \(message)")
+            if self.logs.count > 100 {
+                self.logs.removeFirst(self.logs.count - 100)
+            }
+        }
+    }
+
+    private func formatNumber(_ num: UInt64) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter.string(from: NSNumber(value: num)) ?? "\(num)"
+    }
+
+    private func formatETA(seconds: Double) -> String {
+        if seconds.isInfinite || seconds.isNaN { return "--" }
+        let sec = Int(seconds)
+        let hours = sec / 3600
+        let minutes = (sec % 3600) / 60
+        let s = sec % 60
+        if hours > 0 {
+            return "\(hours)h \(minutes)m \(s)s"
+        } else if minutes > 0 {
+            return "\(minutes)m \(s)s"
+        } else {
+            return "\(s)s"
+        }
+    }
+}

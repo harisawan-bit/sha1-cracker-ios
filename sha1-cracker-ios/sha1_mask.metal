@@ -199,29 +199,28 @@ kernel void sha1_crack_suffix7_b62(
     SHA1_EXPAND(w, 78); SHA1_ROUND_60_79(c, d, e, a, b, w[14]);
     SHA1_EXPAND(w, 79); SHA1_ROUND_60_79(b, c, d, e, a, w[15]);
 
-    // Check target match
-    if ((0x67452301u + a) == params.target_hashes[0] &&
-        (0xEFCDAB89u + b) == params.target_hashes[1] &&
-        (0x98BADCFEu + c) == params.target_hashes[2] &&
-        (0x10325476u + d) == params.target_hashes[3] &&
-        (0xC3D2E1F0u + e) == params.target_hashes[4])
-    {
-        atomic_store_explicit(&result.found_flag, 1, memory_order_relaxed);
-        result.matched_target_index = 0;
-        result.matched_length = 12;
+    // Early-out target match check
+    if ((0x67452301u + a) != params.target_hashes[0]) return;
+    if ((0xEFCDAB89u + b) != params.target_hashes[1]) return;
+    if ((0x98BADCFEu + c) != params.target_hashes[2]) return;
+    if ((0x10325476u + d) != params.target_hashes[3]) return;
+    if ((0xC3D2E1F0u + e) != params.target_hashes[4]) return;
 
-        for (uint k = 0; k < 5; ++k) {
-            result.matched_candidate[k] = params.prefix[k];
-        }
-        result.matched_candidate[5] = s0;
-        result.matched_candidate[6] = s1;
-        result.matched_candidate[7] = s2;
-        result.matched_candidate[8] = s3;
-        result.matched_candidate[9] = s4;
-        result.matched_candidate[10] = s5;
-        result.matched_candidate[11] = s6;
-        result.matched_candidate[12] = 0;
+    atomic_store_explicit(&result.found_flag, 1, memory_order_relaxed);
+    result.matched_target_index = 0;
+    result.matched_length = 12;
+
+    for (uint k = 0; k < 5; ++k) {
+        result.matched_candidate[k] = params.prefix[k];
     }
+    result.matched_candidate[5] = s0;
+    result.matched_candidate[6] = s1;
+    result.matched_candidate[7] = s2;
+    result.matched_candidate[8] = s3;
+    result.matched_candidate[9] = s4;
+    result.matched_candidate[10] = s5;
+    result.matched_candidate[11] = s6;
+    result.matched_candidate[12] = 0;
 }
 
 // -----------------------------------------------------------------------------

@@ -9,7 +9,7 @@ struct ContentView: View {
     @State private var selectedCharsetType: CharsetType = .base62
     @State private var customCharset: String = ""
     @State private var suffixLength: Int = 7
-    @State private var chunkSize: Int = 8_388_608
+    @State private var chunkSize: Int = 16_777_216
     @State private var autoThermalThrottle: Bool = true
     @State private var showLogs: Bool = false
     @State private var showCopiedAlert: Bool = false
@@ -310,6 +310,20 @@ struct ContentView: View {
                         .background(Color(uiColor: .tertiarySystemGroupedBackground))
                         .cornerRadius(8)
                 }
+            }
+
+            // GPU Chunk Size Selector
+            VStack(alignment: .leading, spacing: 4) {
+                Text("GPU Dispatch Chunk Size:")
+                    .font(.caption.bold())
+                    .foregroundColor(.secondary)
+                Picker("Chunk Size", selection: $chunkSize) {
+                    Text("4M").tag(4_194_304)
+                    Text("8M").tag(8_388_608)
+                    Text("16M (Fastest)").tag(16_777_216)
+                    Text("32M").tag(33_554_432)
+                }
+                .pickerStyle(.segmented)
             }
 
             // Thermal Safety Toggle

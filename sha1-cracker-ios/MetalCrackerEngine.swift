@@ -32,7 +32,7 @@ public struct CrackConfig {
         prefix: "sadiy",
         charset: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
         suffixLength: 7,
-        chunkSize: 8_388_608, // 8M keys per chunk (~2-5ms per dispatch on A17 Pro)
+        chunkSize: 16_777_216, // 16M keys per chunk for maximum GPU occupancy
         autoThermalThrottle: true
     )
 
@@ -64,7 +64,8 @@ public final class MetalCrackerEngine: ObservableObject {
     // Metal Pipeline
     private var device: MTLDevice?
     private var commandQueue: MTLCommandQueue?
-    private var pipelineState: MTLComputePipelineState?
+    private var generalPipelineState: MTLComputePipelineState?
+    private var suffix7PipelineState: MTLComputePipelineState?
 
     // Execution Control
     private var isCancelled: Bool = false
@@ -112,12 +113,14 @@ public final class MetalCrackerEngine: ObservableObject {
                 library = try defaultDevice.makeLibrary(source: source, options: nil)
             }
 
-            guard let kernelFunc = library.makeFunction(name: "sha1_mask_crack") else {
-                throw NSError(domain: "MetalCracker", code: 2, userInfo: [NSLocalizedDescriptionKey: "Function 'sha1_mask_crack' not found in library"])
+            if let generalFunc = library.makeFunction(name: "sha1_mask_crack") {
+                self.generalPipelineState = try defaultDevice.makeComputePipelineState(function: generalFunc)
             }
-
-            self.pipelineState = try defaultDevice.makeComputePipelineState(function: kernelFunc)
-            log("Compute Pipeline compiled successfully.")
+            if let suffix7Func = library.makeFunction(name: "sha1_crack_suffix7_b62") {
+                self.suffix7PipelineState = try defaultDevice.makeComputePipelineState(function: suffix7Func)
+                log("Specialized A17 Pro Suffix-7 pipeline compiled.")
+            }
+            log("Compute Pipelines compiled successfully.")
         } catch {
             state = .error
             log("ERROR compiling Metal shader: \(error.localizedDescription)")
@@ -128,7 +131,7 @@ public final class MetalCrackerEngine: ObservableObject {
     // Self-Test Verification
     // -------------------------------------------------------------------------
     public func runSelfTest() {
-        guard let device = device, let commandQueue = commandQueue, let pipeline = pipelineState else {
+        guard let device = device, let commandQueue = commandQueue, let pipeline = generalPipelineState else {
             state = .selfTestFailed
             log("Self-test aborted: Metal pipeline not ready.")
             return
@@ -160,8 +163,8 @@ public final class MetalCrackerEngine: ObservableObject {
     // Cracking Execution Loop
     // -------------------------------------------------------------------------
     public func startCracking(config: CrackConfig) {
-        guard let device = device, let commandQueue = commandQueue, let pipeline = pipelineState else {
-            log("ERROR: Metal device or pipeline unavailable.")
+        guard let device = device, let commandQueue = commandQueue else {
+            log("ERROR: Metal device or queue unavailable.")
             return
         }
 
@@ -169,6 +172,14 @@ public final class MetalCrackerEngine: ObservableObject {
             log("ERROR: No target hashes provided.")
             return
         }
+
+        // Select optimal pipeline: specialized suffix-7 for base62 target H2
+        let useSpecializedSuffix7 = (config.suffixLength == 7 &&
+                                    config.charset == "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" &&
+                                    config.prefix == "sadiy" &&
+                                    suffix7PipelineState != nil)
+
+        let pipeline = useSpecializedSuffix7 ? suffix7PipelineState! : (generalPipelineState ?? suffix7PipelineState!)
 
         // Calculate total keyspace: base ^ suffixLength
         let base = UInt64(config.charset.count)
@@ -195,6 +206,7 @@ public final class MetalCrackerEngine: ObservableObject {
         self.lastSpeedCheckKeys = 0
 
         log("Starting crack: prefix='\(config.prefix)', suffixLen=\(config.suffixLength), base=\(base)")
+        log("Pipeline: \(useSpecializedSuffix7 ? "A17 Pro Suffix-7 Ultra-Fast" : "General Mask Engine")")
         log("Total keyspace: \(formatNumber(finalTotal)) candidates.")
 
         // Start UI Telemetry Timer
@@ -220,12 +232,12 @@ public final class MetalCrackerEngine: ObservableObject {
         config: CrackConfig,
         totalKeys: UInt64
     ) {
-        let maxConcurrentBuffers = 3
+        let maxConcurrentBuffers = 4
         let semaphore = DispatchSemaphore(value: maxConcurrentBuffers)
         var currentStartIdx: UInt64 = 0
         let chunkSize = UInt64(config.chunkSize)
 
-        // Allocate reusable double/triple buffers
+        // Allocate reusable double/triple/quad buffers
         var paramBuffers: [MTLBuffer] = []
         var resultBuffers: [MTLBuffer] = []
         for _ in 0..<maxConcurrentBuffers {
@@ -257,9 +269,9 @@ public final class MetalCrackerEngine: ObservableObject {
             if config.autoThermalThrottle {
                 let thermal = ProcessInfo.processInfo.thermalState
                 if thermal == .serious {
-                    Thread.sleep(forTimeInterval: 0.02)
+                    Thread.sleep(forTimeInterval: 0.01)
                 } else if thermal == .critical {
-                    Thread.sleep(forTimeInterval: 0.08)
+                    Thread.sleep(forTimeInterval: 0.05)
                 }
             }
 
@@ -291,7 +303,8 @@ public final class MetalCrackerEngine: ObservableObject {
             encoder.setBuffer(pb, offset: 0, index: 0)
             encoder.setBuffer(rb, offset: 0, index: 1)
 
-            let threadsPerGroup = MTLSize(width: min(256, Int(thisChunkSize)), height: 1, depth: 1)
+            let threadgroupWidth = min(512, Int(thisChunkSize))
+            let threadsPerGroup = MTLSize(width: threadgroupWidth, height: 1, depth: 1)
             let totalThreads = MTLSize(width: Int(thisChunkSize), height: 1, depth: 1)
             encoder.dispatchThreads(totalThreads, threadsPerThreadgroup: threadsPerGroup)
             encoder.endEncoding()
@@ -399,15 +412,16 @@ public final class MetalCrackerEngine: ObservableObject {
         ptr.initializeMemory(as: UInt8.self, repeating: 0, count: 512)
 
         // struct CrackParams layout:
-        // offset 0:  ulong chunk_start_idx (8 bytes)
-        // offset 8:  uint chunk_size (4 bytes)
-        // offset 12: uint prefix_len (4 bytes)
-        // offset 16: uint suffix_len (4 bytes)
-        // offset 20: uint base (4 bytes)
-        // offset 24: uint target_count (4 bytes)
-        // offset 28: uint target_hashes[16 * 5] (320 bytes)
+        // offset 0:   ulong chunk_start_idx (8 bytes)
+        // offset 8:   uint chunk_size (4 bytes)
+        // offset 12:  uint prefix_len (4 bytes)
+        // offset 16:  uint suffix_len (4 bytes)
+        // offset 20:  uint base (4 bytes)
+        // offset 24:  uint target_count (4 bytes)
+        // offset 28:  uint target_hashes[16 * 5] (320 bytes)
         // offset 348: uchar prefix[64] (64 bytes)
         // offset 412: uchar charset[64] (64 bytes)
+        // offset 476: uint prefix_words[4] (16 bytes)
 
         ptr.storeBytes(of: startIdx, toByteOffset: 0, as: UInt64.self)
         ptr.storeBytes(of: chunkSize, toByteOffset: 8, as: UInt32.self)
@@ -451,6 +465,18 @@ public final class MetalCrackerEngine: ObservableObject {
         for i in 0..<min(64, charsetBytes.count) {
             ptr.advanced(by: 412 + i).storeBytes(of: charsetBytes[i], as: UInt8.self)
         }
+
+        // Compute pre-packed prefix words (e.g. for "sadiy": word0 = 'sadi', word1 = 'y' << 24)
+        var pw0: UInt32 = 0
+        var pw1: UInt32 = 0
+        if prefixBytes.count >= 4 {
+            pw0 = (UInt32(prefixBytes[0]) << 24) | (UInt32(prefixBytes[1]) << 16) | (UInt32(prefixBytes[2]) << 8) | UInt32(prefixBytes[3])
+        }
+        if prefixBytes.count >= 5 {
+            pw1 = UInt32(prefixBytes[4]) << 24
+        }
+        ptr.storeBytes(of: pw0, toByteOffset: 476, as: UInt32.self)
+        ptr.storeBytes(of: pw1, toByteOffset: 480, as: UInt32.self)
     }
 
     // -------------------------------------------------------------------------
